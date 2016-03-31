@@ -1,0 +1,7 @@
+[package]
+name = "payoffs"
+version = "0.1.0"
+authors = ["Albert Pang <albert.pang@me.com>"]
+
+[dependencies]
+rand = "0.3.14"
