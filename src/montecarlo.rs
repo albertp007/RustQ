@@ -33,3 +33,19 @@ fn gbm_paths(s0: f64, r: f64, q: f64, v: f64, t: f64, randVec: &Vec<f64>)
         .map( |x| { s0 * x.exp() })
         .collect()
 }
+
+fn makeAntithetic(orig: &Vec<f64>) -> Vec<f64> {
+    orig.iter().map( |x| { -x }).collect()
+}
+
+fn gbm( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
+    vr: VarianceReduction ) -> Path<f64> {
+    let path = gbm_paths(s0, r, q, v, t, &draw_normal(0.0, v, n));
+    match vr {
+        VarianceReduction::None => Path::Ordinary(path),
+        VarianceReduction::ATV => {
+            let anti = makeAntithetic(&path);
+            Path::Antithetic((path, anti))
+        }
+    }
+}
