@@ -38,6 +38,22 @@ fn phi(x: f64)->f64 {
     0.5*(1.0 + sign as f64*y)
 }
 
+/// Calculate vanilla option price using the Black-Scholes equation
+/// #Argument
+/// * `s0` - initial stock price at time 0
+/// * `r` - interest rate
+/// * `q` - convenience yield (absorbs any cost or yield of holding the asset)
+/// * `v` - volatility e.g. 0.4 is 40 vol points (per annum)
+/// * `t` - number of years e.g. 0.25 is quarter of a year
+/// * `opt_type` - option type
+/// * `k` - strike price
+///
+/// #Example
+/// ```
+/// let call = payoffs::option::black_scholes( 100.0, 0.02, 0.0, 0.4, 0.25,
+///     payoffs::option::OptionType::Call, 100.0);
+/// println!( "price: {}", call);
+/// ```
 pub fn black_scholes(s0:f64, r:f64, q:f64, v: f64, t:f64, opt_type:OptionType,
     k:f64) -> f64 {
     let f = s0 * ((r-q)*t).exp();

@@ -4,16 +4,44 @@ use self::rand::distributions::normal::Normal;
 use self::rand::distributions::IndependentSample;
 use option::OptionType;
 
+/// Type to specify the type of variance reduction scheme to be used when
+/// generating paths
+///
+/// * None for no variance reduction
+/// * ATV for Antithetic variates
+///
 pub enum VarianceReduction {
     None,
     ATV
 }
 
+/// Type to represent a stock path.
+///
+/// * An ordinary path is simply a vector of f64, each item representing a
+/// price.
+/// * An antithetic path is a pair of vectors, whereby the element-by-element
+/// sum of the vector of normally distributed samples which are used to generate
+/// the stock paths is equal to zero.  (Note that it is not the sum of the stock
+/// paths that add up to zero, but the sample vectors which are used to generate
+/// them)
 pub enum Path<T> {
     Ordinary(Vec<T>),
     Antithetic((Vec<T>, Vec<T>))
 }
 
+/// Draw samples from a normal distribution with the mean and standard deviation
+/// specified in the arguments
+///
+/// # Argument
+/// * `mean` - Mean
+/// * `sd` - Standard deviation
+/// * `n` - number of samples to draw
+///
+/// # Example
+/// ```
+/// let samples = payoffs::montecarlo::draw_normal( 0.0, 1.0, 100 );
+/// println!( "{:?}", samples );
+/// ```
 pub fn draw_normal(mean: f64, sd: f64, n: u32) -> Vec<f64> {
     let mut rng = rand::thread_rng();
     let normal = Normal::new(mean, sd);
@@ -22,6 +50,26 @@ pub fn draw_normal(mean: f64, sd: f64, n: u32) -> Vec<f64> {
     }).collect()
 }
 
+/// Given a vector of normally distributed samples, generate one stock path
+/// using the geometric brownian motion model
+///
+/// #Argument
+/// * `s0` - initial stock price at time 0
+/// * `r` - interest rate
+/// * `q` - convenience yield (absorbs any cost or yield of holding the asset)
+/// * `v` - volatility e.g. 0.4 is 40 vol points (per annum)
+/// * `t` - number of years e.g. 0.25 is quarter of a year
+///
+/// #Example
+/// ```
+/// let t = 0.25;
+/// let n = 100;
+/// let normal_samples = payoffs::montecarlo::draw_normal( 0.0,
+///     (t/n as f64).sqrt(), n);
+/// let samples = payoffs::montecarlo::gbm_samples(100.0, 0.02, 0.0, 0.4, 0.25,
+///     &normal_samples);
+/// println!("{:?}", samples);
+/// ```
 pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
     normal_samples: &Vec<f64>) -> Vec<f64>
 {
@@ -36,17 +84,46 @@ pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
         .collect()
 }
 
-fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
+/// Create the anti-thetic vector given a vector of normally distributed samples
+///
+/// #Argument
+/// * `orig` - the original vector of normally distributed samples
+///
+/// #Example
+/// ```
+/// let normal_samples = payoffs::montecarlo::draw_normal( 0.0, 1.0, 100 );
+/// let anti = payoffs::montecarlo::make_antithetic( &normal_samples );
+/// println!("{:?}", anti);
+/// ```
+pub fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
     orig.iter().map( |x| { -x }).collect()
 }
 
+/// Generate an instance of Path struct assuming geometric brownian motion
+/// given the type of variance reduction scheme
+///
+/// #Argument
+/// * `s0` - initial stock price at time 0
+/// * `r` - interest rate
+/// * `q` - convenience yield (absorbs any cost or yield of holding the asset)
+/// * `v` - volatility e.g. 0.4 is 40 vol points (per annum)
+/// * `t` - number of years e.g. 0.25 is quarter of a year
+/// * `n` - number of points in the path
+/// * `vr` - variance reduction scheme
+///
+/// #Example
+/// ```
+/// let single_path = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4, 0.25,
+///     100, payoffs::montecarlo::VarianceReduction::None);
+/// let pair_of_paths = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4,
+///     0.25, 100, payoffs::montecarlo::VarianceReduction::ATV);
+/// ```
 pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
     vr: VarianceReduction ) -> Path<f64> {
     let sd = (t/n as f64).sqrt();
     let normal_samples = draw_normal(0.0, sd, n);
     let path = gbm_samples(s0, r, q, v, t, &normal_samples);
 
-    // println!("{:?}", path);
     match vr {
         VarianceReduction::None => Path::Ordinary(path),
         VarianceReduction::ATV => {
@@ -57,6 +134,56 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
     }
 }
 
+/// A boxed closure representing the vanilla european payoff function
+///
+/// # Argument
+/// * `opt_type` - option::OptionType, either call or put
+/// * `r` - interest rate
+/// * `t` - time in years
+pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
+    -> Box<Fn(&Vec<f64>)->f64>
+{
+    Box::new( move |path: &Vec<f64>| {
+        let intrinsic: f64 = path[path.len()-1] - strike;
+        let intrinsic = match opt_type {
+            OptionType::Call => intrinsic,
+            OptionType::Put => -intrinsic
+        };
+        let payoff = intrinsic.max(0.0);
+        if payoff > 0.0 { (-r*t).exp() * payoff } else { 0.0 }
+    } )
+}
+
+/// Run monte carlo simulation given an instance of Path struct and a boxed
+/// closure which defines the payoff function given a path
+///
+/// # Argument
+/// * `paths` - a vector of Path structs
+/// * `f` - a boxed closure defining the payoff function given a path.  See
+/// european_payoff for an example
+///
+/// # Example
+/// ```
+/// let s0 = 100.0;
+/// let r = 0.02;
+/// let q = 0.0;
+/// let v = 0.4;
+/// let t = 0.25;
+/// let k = 100.0;
+/// let m = 5000000;
+///
+/// let paths: Vec<payoffs::montecarlo::Path<f64>> = (0..m)
+///     .map(|_| payoffs::montecarlo::gbm_path( s0, r, q, v, t, 1,
+///         payoffs::montecarlo::VarianceReduction::ATV))
+///     .collect();
+///
+/// let (estimate, _, _) =
+///     payoffs::montecarlo::monte_carlo(&paths,
+///         payoffs::montecarlo::european_payoff(
+///         payoffs::option::OptionType::Call, r, t, k));
+///
+/// println!("Estimate: {}", estimate);
+/// ```
 pub fn monte_carlo(paths: &Vec<Path<f64>>, f: Box<Fn(&Vec<f64>)->f64>)
     -> (f64, f64, f64)
 {
@@ -77,20 +204,6 @@ pub fn monte_carlo(paths: &Vec<Path<f64>>, f: Box<Fn(&Vec<f64>)->f64>)
     (estimate, var, stderr)
 }
 
-pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
-    -> Box<Fn(&Vec<f64>)->f64>
-{
-    Box::new( move |path: &Vec<f64>| {
-        let intrinsic: f64 = path[path.len()-1] - strike;
-        let intrinsic = match opt_type {
-            OptionType::Call => intrinsic,
-            OptionType::Put => -intrinsic
-        };
-        let payoff = intrinsic.max(0.0);
-        if payoff > 0.0 { (-r*t).exp() * payoff } else { 0.0 }
-    } )
-}
-
 #[cfg(test)]
 mod test {
     extern crate time;
@@ -99,13 +212,11 @@ mod test {
     use montecarlo::monte_carlo;
     use montecarlo::VarianceReduction;
     use montecarlo::gbm_path;
-    use montecarlo::gbm_samples;
     use montecarlo::Path;
     use montecarlo::draw_normal;
     use montecarlo::european_payoff;
     use montecarlo::make_antithetic;
     use util::equal_within;
-    use std::cmp;
 
     #[test]
     fn mc_european_call() {
@@ -121,7 +232,7 @@ mod test {
         let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 1,
             VarianceReduction::ATV)).collect();
 
-        let (estimate, var, err) =
+        let (estimate, _, err) =
             monte_carlo(&paths, european_payoff(OptionType::Call, r, t, k));
 
         println!("{} secs", time::precise_time_s() - now);
