@@ -48,3 +48,26 @@ pub fn black_scholes(s0:f64, r:f64, q:f64, v: f64, t:f64, opt_type:OptionType,
         OptionType::Put => (-r*t).exp()*(k*phi(-d2)-f*phi(-d1))
     }
 }
+
+#[cfg(test)]
+mod test {
+    extern crate time;
+    use option::black_scholes;
+    use option::OptionType;
+    use util::equal_within;
+
+    #[test]
+    fn put_call_parity() {
+        let s0 = 100.0;
+        let r = 0.02;
+        let q = 0.0;
+        let v = 0.4;
+        let t = 0.25;
+        let k = s0;
+        let call = black_scholes(s0, r, q, v, t, OptionType::Call, k);
+        let put = black_scholes(s0, r, q, v, t, OptionType::Put, k);
+        println!("Call: {}, Put: {}", call, put);
+        assert_eq!(true, equal_within(put + s0, call + k * (-r*t as f64).exp(),
+            0.0000001));
+    }
+}
