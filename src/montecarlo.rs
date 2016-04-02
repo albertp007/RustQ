@@ -3,6 +3,8 @@ extern crate rand;
 use self::rand::distributions::normal::Normal;
 use self::rand::distributions::IndependentSample;
 use option::OptionType;
+use option::BarrierType;
+use option::BarrierDirection;
 
 /// Type to specify the type of variance reduction scheme to be used when
 /// generating paths
@@ -28,6 +30,8 @@ pub enum Path<T> {
     Ordinary(Vec<T>),
     Antithetic((Vec<T>, Vec<T>))
 }
+
+pub type PayoffFunc = Box<Fn(&Vec<f64>)->f64>;
 
 /// Draw samples from a normal distribution with the mean and standard deviation
 /// specified in the arguments
@@ -141,9 +145,9 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
 /// * `r` - interest rate
 /// * `t` - time in years
 pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
-    -> Box<Fn(&Vec<f64>)->f64>
+    -> PayoffFunc
 {
-    Box::new( move |path: &Vec<f64>| {
+    Box::new( move |path| {
         let intrinsic: f64 = path[path.len()-1] - strike;
         let intrinsic = match opt_type {
             OptionType::Call => intrinsic,
@@ -152,6 +156,15 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
         let payoff = intrinsic.max(0.0);
         if payoff > 0.0 { (-r*t).exp() * payoff } else { 0.0 }
     } )
+}
+
+pub fn barrier_payoff(barrier_type: BarrierType,
+    barrier_direction: BarrierDirection, r: f64, t: f64, barrier: f64,
+    strike: f64) -> PayoffFunc
+{
+    Box::new( move |path| {
+        0.0
+    })
 }
 
 /// Run monte carlo simulation given an instance of Path struct and a boxed
@@ -184,8 +197,7 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 ///
 /// println!("Estimate: {}", estimate);
 /// ```
-pub fn monte_carlo(paths: &Vec<Path<f64>>, f: Box<Fn(&Vec<f64>)->f64>)
-    -> (f64, f64, f64)
+pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
 {
     let payoffs: Vec<f64> = paths.iter().map( |path| {
         match path {
