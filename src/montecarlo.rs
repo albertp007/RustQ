@@ -83,7 +83,7 @@ pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
     // println!("drift: {}", drift);
     normal_samples.iter()
         .map( |dwt| { drift + v * dwt })
-        .scan(0.0, |acc, x| { Some(*acc + x) })
+        .scan(0.0, |acc, x| { *acc = *acc + x; Some(*acc) })
         .map( |x| { s0 * x.exp() })
         .collect()
 }
@@ -159,11 +159,38 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 }
 
 pub fn barrier_payoff(barrier_type: BarrierType,
-    barrier_direction: BarrierDirection, r: f64, t: f64, barrier: f64,
-    strike: f64) -> PayoffFunc
+    barrier_direction: BarrierDirection, opt_type: OptionType,
+    r: f64, t: f64, barrier: f64, strike: f64) -> PayoffFunc
 {
     Box::new( move |path| {
-        0.0
+        let intrinsic = path[path.len()-1] - strike;
+        let discount = (-r*t).exp();
+        let payoff: f64  =
+            match barrier_type {
+                BarrierType::In =>
+                    match barrier_direction {
+                        BarrierDirection::Up =>
+                            if path.iter().any( |&x| x > barrier )
+                            { intrinsic } else { 0.0 },
+                        BarrierDirection::Down =>
+                            if path.iter().any( |&x| x < barrier )
+                            { intrinsic } else { 0.0 },
+                    },
+                BarrierType::Out =>
+                    match barrier_direction {
+                        BarrierDirection::Up =>
+                            if path.iter().any( |&x| x > barrier )
+                            { 0.0 } else { intrinsic },
+                        BarrierDirection::Down =>
+                            if path.iter().any( |&x| x < barrier )
+                            { 0.0 } else { intrinsic },
+                    }
+            };
+        // println!( "intrinsic: {}, payoff: {}", intrinsic, payoff.max(0.0));
+        ( match opt_type {
+            OptionType::Call => payoff.max(0.0),
+            OptionType::Put => (-payoff).max(0.0)
+        } ) * discount
     })
 }
 
@@ -209,7 +236,6 @@ pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
     let sum = payoffs.iter().fold( 0.0, |acc, x| acc + x );
     let sq_sum = payoffs.iter().fold( 0.0, |acc, x| acc + x * x );
     let n = paths.len();
-    println!("n: {}", n);
     let estimate = sum/n as f64;
     let var = sq_sum/(n-1) as f64 - estimate*estimate;
     let stderr = (var/n as f64).sqrt();
@@ -221,12 +247,15 @@ mod test {
     extern crate time;
     use option::OptionType;
     use option::black_scholes;
+    use option::BarrierType;
+    use option::BarrierDirection;
     use montecarlo::monte_carlo;
     use montecarlo::VarianceReduction;
     use montecarlo::gbm_path;
     use montecarlo::Path;
     use montecarlo::draw_normal;
     use montecarlo::european_payoff;
+    use montecarlo::barrier_payoff;
     use montecarlo::make_antithetic;
     use util::equal_within;
 
@@ -249,7 +278,8 @@ mod test {
 
         println!("{} secs", time::precise_time_s() - now);
 
-        let bs = black_scholes(s0, r, q, v, t, OptionType::Call, s0);
+        let bs = black_scholes(s0, r, q, v, t, OptionType::Call, k);
+        println!("estimate: {}, bs: {}", estimate, bs);
         assert_eq!( true, equal_within(bs, estimate, 2.0*err) );
     }
 
@@ -279,5 +309,28 @@ mod test {
             .map(|(x, y)| x + y)
             .all( |x| x == 0.0 );
         assert_eq!( true, sum_to_zero );
+    }
+
+    #[test]
+    fn test_mc_down_out() {
+        let s0 = 100.0;
+        let r = 0.02;
+        let q = 0.0;
+        let v = 0.4;
+        let t = 0.25;
+        let k = 100.0;
+        let barrier = 125.0;
+        let m = 10000000;
+
+        let now = time::precise_time_s();
+        let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 3,
+            VarianceReduction::ATV)).collect();
+
+        let (estimate, _, _) =
+            monte_carlo(&paths, barrier_payoff(BarrierType::Out,
+                BarrierDirection::Up, OptionType::Call, r, t, barrier, k));
+        println!("{} secs", time::precise_time_s() - now);
+
+        assert_eq!( 0.0, estimate );
     }
 }
