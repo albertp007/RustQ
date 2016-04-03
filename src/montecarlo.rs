@@ -3,8 +3,8 @@ extern crate rand;
 use self::rand::distributions::normal::Normal;
 use self::rand::distributions::IndependentSample;
 use option::OptionType;
-use option::BarrierType;
-use option::BarrierDirection;
+use option::BarrierInOut;
+use option::BarrierUpDown;
 
 /// Type to specify the type of variance reduction scheme to be used when
 /// generating paths
@@ -143,7 +143,7 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
 /// # Argument
 /// * `opt_type` - option::OptionType, either call or put
 /// * `r` - interest rate
-/// * `t` - time in years
+/// * `t` - time to expiry in years
 pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
     -> PayoffFunc
 {
@@ -158,30 +158,68 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
     } )
 }
 
-pub fn barrier_payoff(barrier_type: BarrierType,
-    barrier_direction: BarrierDirection, opt_type: OptionType,
+/// A boxed closure representing the payoff function of barrier option
+///
+/// # Argument
+/// * `barrier_updown` - Up or down
+/// * `barrier_inout` - In or Out
+/// * `opt_type` - Call or put
+/// * `r` - interest rate
+/// * `t` - time to expiry in years
+/// * `barrier` - barrier price
+/// * `strike` - strike price
+///
+/// # Example
+/// To price and up and out call with initial stock price 100.0, interest rate
+/// 2%, zero yield, volatility 40% p.a., time to expiry 0.25 years (3 months),
+/// barrier 125 and strike 100, with a monthly observation i.e. 3 observations
+///
+/// ```
+/// let s0 = 100.0;
+/// let r = 0.02;
+/// let q = 0.0;
+/// let v = 0.4;
+/// let t = 0.25;
+/// let k = 100.0;
+/// let barrier = 125.0;
+/// let m = 10000000;
+/// let obs = 3;
+///
+/// let paths: Vec<payoffs::montecarlo::Path<f64>> =
+///     (0..m).map(|_| payoffs::montecarlo::gbm_path(s0, r, q, v, t, obs,
+///         payoffs::montecarlo::VarianceReduction::ATV)).collect();
+///
+/// let (estimate, _, _) =
+///     payoffs::montecarlo::monte_carlo(&paths,
+///         payoffs::montecarlo::barrier_payoff(
+///             payoffs::option::BarrierUpDown::Up,
+///             payoffs::option::BarrierInOut::Out,
+///             payoffs::option::OptionType::Call, r, t, barrier, k));
+/// ```
+pub fn barrier_payoff(barrier_updown: BarrierUpDown,
+    barirer_inout: BarrierInOut, opt_type: OptionType,
     r: f64, t: f64, barrier: f64, strike: f64) -> PayoffFunc
 {
     Box::new( move |path| {
         let intrinsic = path[path.len()-1] - strike;
         let discount = (-r*t).exp();
         let payoff: f64  =
-            match barrier_type {
-                BarrierType::In =>
-                    match barrier_direction {
-                        BarrierDirection::Up =>
+            match barirer_inout {
+                BarrierInOut::In =>
+                    match barrier_updown {
+                        BarrierUpDown::Up =>
                             if path.iter().any( |&x| x > barrier )
                             { intrinsic } else { 0.0 },
-                        BarrierDirection::Down =>
+                        BarrierUpDown::Down =>
                             if path.iter().any( |&x| x < barrier )
                             { intrinsic } else { 0.0 },
                     },
-                BarrierType::Out =>
-                    match barrier_direction {
-                        BarrierDirection::Up =>
+                BarrierInOut::Out =>
+                    match barrier_updown {
+                        BarrierUpDown::Up =>
                             if path.iter().any( |&x| x > barrier )
                             { 0.0 } else { intrinsic },
-                        BarrierDirection::Down =>
+                        BarrierUpDown::Down =>
                             if path.iter().any( |&x| x < barrier )
                             { 0.0 } else { intrinsic },
                     }
@@ -247,8 +285,8 @@ mod test {
     extern crate time;
     use option::OptionType;
     use option::black_scholes;
-    use option::BarrierType;
-    use option::BarrierDirection;
+    use option::BarrierUpDown;
+    use option::BarrierInOut;
     use montecarlo::monte_carlo;
     use montecarlo::VarianceReduction;
     use montecarlo::gbm_path;
@@ -312,7 +350,7 @@ mod test {
     }
 
     #[test]
-    fn test_mc_down_out() {
+    fn test_mc_up_out_call() {
         let s0 = 100.0;
         let r = 0.02;
         let q = 0.0;
@@ -327,10 +365,12 @@ mod test {
             VarianceReduction::ATV)).collect();
 
         let (estimate, _, _) =
-            monte_carlo(&paths, barrier_payoff(BarrierType::Out,
-                BarrierDirection::Up, OptionType::Call, r, t, barrier, k));
+            monte_carlo(&paths, barrier_payoff(BarrierUpDown::Up,
+                BarrierInOut::Out, OptionType::Call, r, t, barrier, k));
         println!("{} secs", time::precise_time_s() - now);
 
-        assert_eq!( 0.0, estimate );
+        // No easy way to test this, hard-coding a value of 3.30 for now which
+        // is obtained from the F# deep dives book
+        assert_eq!( true, equal_within(estimate, 3.30, 0.01) );
     }
 }
