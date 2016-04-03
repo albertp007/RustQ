@@ -8,12 +8,12 @@ pub enum ExerciseType {
     American
 }
 
-pub enum BarrierDirection {
+pub enum BarrierUpDown {
     Up,
     Down
 }
 
-pub enum BarrierType {
+pub enum BarrierInOut {
     In,
     Out
 }
