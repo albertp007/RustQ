@@ -12,6 +12,7 @@ use option::BarrierUpDown;
 /// * None for no variance reduction
 /// * ATV for Antithetic variates
 ///
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarianceReduction {
     None,
     ATV

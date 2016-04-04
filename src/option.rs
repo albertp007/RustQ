@@ -2,21 +2,25 @@ extern crate probability;
 
 use self::probability::prelude::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionType {
     Call,
     Put
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExerciseType {
     European,
     American
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarrierUpDown {
     Up,
     Down
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarrierInOut {
     In,
     Out
