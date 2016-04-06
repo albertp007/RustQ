@@ -44,13 +44,14 @@ pub enum BarrierInOut {
 /// ```
 pub fn black_scholes(s0:f64, r:f64, q:f64, v: f64, t:f64, opt_type:OptionType,
     k:f64) -> f64 {
+    use option::OptionType::*;
     let normal = Gaussian::new(0.0, 1.0);
     let f = s0 * ((r-q)*t).exp();
     let d1 = 1.0 / v / t.sqrt() * ( (s0/k).ln() + (r-q+0.5*v*v)*t);
     let d2 = d1 - v*t.sqrt();
     match opt_type {
-        OptionType::Call => (-r*t).exp()*(f*normal.cdf(d1)-k*normal.cdf(d2)),
-        OptionType::Put => (-r*t).exp()*(k*normal.cdf(-d2)-f*normal.cdf(-d1))
+        Call => (-r*t).exp()*(f*normal.cdf(d1)-k*normal.cdf(d2)),
+        Put => (-r*t).exp()*(k*normal.cdf(-d2)-f*normal.cdf(-d1))
     }
 }
 
@@ -58,7 +59,7 @@ pub fn black_scholes(s0:f64, r:f64, q:f64, v: f64, t:f64, opt_type:OptionType,
 mod test {
     extern crate time;
     use option::black_scholes;
-    use option::OptionType;
+    use option::OptionType::*;
     use util::equal_within;
 
     #[test]
@@ -69,8 +70,8 @@ mod test {
         let v = 0.4;
         let t = 0.25;
         let k = s0;
-        let call = black_scholes(s0, r, q, v, t, OptionType::Call, k);
-        let put = black_scholes(s0, r, q, v, t, OptionType::Put, k);
+        let call = black_scholes(s0, r, q, v, t, Call, k);
+        let put = black_scholes(s0, r, q, v, t, Put, k);
         println!("Call: {}, Put: {}", call, put);
         assert_eq!(true, equal_within(put + s0, call + k * (-r*t as f64).exp(),
             0.0000001));
