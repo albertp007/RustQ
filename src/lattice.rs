@@ -22,6 +22,10 @@ impl Binomial {
         ((i*i + 2*i + j)/2) as usize
     }
 
+    pub fn get_asset_price(&self, i: isize, j: isize) -> f64 {
+        self.asset_prices[Binomial::to_index(i, j)]
+    }
+
     pub fn new(s0: f64, r: f64, q: f64, v: f64, t: f64, period: usize)
         -> Binomial {
         let num_nodes = Binomial::calc_num_nodes(period);
@@ -56,7 +60,7 @@ mod test {
     use lattice::Binomial;
 
     #[test]
-    pub fn test_binomial_populate_grid() {
+    pub fn test_binomial_populate_and_get_asset_price() {
 
         fn expected_price(s0: f64, up: f64, j: isize) -> f64 {
             s0 * (up * j as f64).exp()
@@ -75,11 +79,12 @@ mod test {
             for ii in 0..(i+1) {
                 let j = -i + ii * 2;
                 let expected = expected_price(s0, grid.up, j);
-                let actual = grid.asset_prices[Binomial::to_index(i, j)];
+                let actual = grid.get_asset_price(i, j);
                 println!("({}, {}), expected: {}, actual: {}", i, j, expected,
                     actual );
                 assert_eq!( expected, actual );
             }
         }
+        assert_eq!( s0, grid.get_asset_price(4, 0) );
     }
 }
