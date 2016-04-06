@@ -3,8 +3,11 @@ extern crate rand;
 use self::rand::distributions::normal::Normal;
 use self::rand::distributions::IndependentSample;
 use option::OptionType;
+use option::OptionType::*;
 use option::BarrierInOut;
+use option::BarrierInOut::*;
 use option::BarrierUpDown;
+use option::BarrierUpDown::*;
 
 /// Type to specify the type of variance reduction scheme to be used when
 /// generating paths
@@ -33,6 +36,7 @@ pub enum Path<T> {
 }
 
 pub type PayoffFunc = Box<Fn(&Vec<f64>)->f64>;
+use montecarlo::VarianceReduction::*;
 
 /// Draw samples from a normal distribution with the mean and standard deviation
 /// specified in the arguments
@@ -50,6 +54,7 @@ pub type PayoffFunc = Box<Fn(&Vec<f64>)->f64>;
 pub fn draw_normal(mean: f64, sd: f64, n: u32) -> Vec<f64> {
     let mut rng = rand::thread_rng();
     let normal = Normal::new(mean, sd);
+
     (0..n).map( |_| {
         normal.ind_sample(&mut rng)
     }).collect()
@@ -130,8 +135,8 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
     let path = gbm_samples(s0, r, q, v, t, &normal_samples);
 
     match vr {
-        VarianceReduction::None => Path::Ordinary(path),
-        VarianceReduction::ATV => {
+        None => Path::Ordinary(path),
+        ATV => {
             let anti_samples = make_antithetic(&normal_samples);
             let anti = gbm_samples(s0, r, q, v, t, &anti_samples);
             Path::Antithetic((path, anti))
@@ -151,8 +156,8 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
     Box::new( move |path| {
         let intrinsic: f64 = path[path.len()-1] - strike;
         let intrinsic = match opt_type {
-            OptionType::Call => intrinsic,
-            OptionType::Put => -intrinsic
+            Call => intrinsic,
+            Put => -intrinsic
         };
         let payoff = intrinsic.max(0.0);
         if payoff > 0.0 { (-r*t).exp() * payoff } else { 0.0 }
@@ -198,37 +203,23 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 ///             payoffs::option::OptionType::Call, r, t, barrier, k));
 /// ```
 pub fn barrier_payoff(barrier_updown: BarrierUpDown,
-    barirer_inout: BarrierInOut, opt_type: OptionType,
+    barrier_inout: BarrierInOut, opt_type: OptionType,
     r: f64, t: f64, barrier: f64, strike: f64) -> PayoffFunc
 {
     Box::new( move |path| {
         let intrinsic = path[path.len()-1] - strike;
         let discount = (-r*t).exp();
-        let payoff: f64  =
-            match barirer_inout {
-                BarrierInOut::In =>
-                    match barrier_updown {
-                        BarrierUpDown::Up =>
-                            if path.iter().any( |&x| x > barrier )
-                            { intrinsic } else { 0.0 },
-                        BarrierUpDown::Down =>
-                            if path.iter().any( |&x| x < barrier )
-                            { intrinsic } else { 0.0 },
-                    },
-                BarrierInOut::Out =>
-                    match barrier_updown {
-                        BarrierUpDown::Up =>
-                            if path.iter().any( |&x| x > barrier )
-                            { 0.0 } else { intrinsic },
-                        BarrierUpDown::Down =>
-                            if path.iter().any( |&x| x < barrier )
-                            { 0.0 } else { intrinsic },
-                    }
-            };
-        // println!( "intrinsic: {}, payoff: {}", intrinsic, payoff.max(0.0));
+        let triggered = match barrier_updown {
+            Up => path.iter().any( |&x| x > barrier ),
+            Down => path.iter().any( |&x| x < barrier )
+        };
+        let payoff: f64 = match barrier_inout {
+            In => if triggered { intrinsic } else { 0.0 },
+            Out => if triggered { 0.0 } else {intrinsic}
+        };
         ( match opt_type {
-            OptionType::Call => payoff.max(0.0),
-            OptionType::Put => (-payoff).max(0.0)
+            Call => payoff.max(0.0),
+            Put => (-payoff).max(0.0)
         } ) * discount
     })
 }
@@ -284,12 +275,12 @@ pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
 #[cfg(test)]
 mod test {
     extern crate time;
-    use option::OptionType;
+    use option::OptionType::*;
     use option::black_scholes;
-    use option::BarrierUpDown;
-    use option::BarrierInOut;
+    use option::BarrierUpDown::*;
+    use option::BarrierInOut::*;
     use montecarlo::monte_carlo;
-    use montecarlo::VarianceReduction;
+    use montecarlo::VarianceReduction::*;
     use montecarlo::gbm_path;
     use montecarlo::Path;
     use montecarlo::draw_normal;
@@ -310,14 +301,14 @@ mod test {
 
         let now = time::precise_time_s();
         let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 1,
-            VarianceReduction::ATV)).collect();
+            ATV)).collect();
 
         let (estimate, _, err) =
-            monte_carlo(&paths, european_payoff(OptionType::Call, r, t, k));
+            monte_carlo(&paths, european_payoff(Call, r, t, k));
 
         println!("{} secs", time::precise_time_s() - now);
 
-        let bs = black_scholes(s0, r, q, v, t, OptionType::Call, k);
+        let bs = black_scholes(s0, r, q, v, t, Call, k);
         println!("estimate: {}, bs: {}", estimate, bs);
         assert_eq!( true, equal_within(bs, estimate, 2.0*err) );
     }
@@ -363,11 +354,10 @@ mod test {
 
         let now = time::precise_time_s();
         let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 3,
-            VarianceReduction::ATV)).collect();
+            ATV)).collect();
 
         let (estimate, _, _) =
-            monte_carlo(&paths, barrier_payoff(BarrierUpDown::Up,
-                BarrierInOut::Out, OptionType::Call, r, t, barrier, k));
+            monte_carlo(&paths, barrier_payoff(Up, Out, Call, r, t, barrier, k));
         println!("{} secs", time::precise_time_s() - now);
 
         // No easy way to test this, hard-coding a value of 3.30 for now which
