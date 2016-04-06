@@ -72,7 +72,7 @@ mod test {
         let v = 0.3;
         let t = 2.0;
         let period = 5;
-        let mut grid = Binomial::new(s0, r, q, v, t, period);
+        let grid = Binomial::new(s0, r, q, v, t, period);
 
         let n = grid.period as isize;
         for i in 0..(n+1) {
