@@ -51,7 +51,7 @@ use montecarlo::VarianceReduction::*;
 /// let samples = payoffs::montecarlo::draw_normal( 0.0, 1.0, 100 );
 /// println!( "{:?}", samples );
 /// ```
-pub fn draw_normal(mean: f64, sd: f64, n: u32) -> Vec<f64> {
+pub fn draw_normal(mean: f64, sd: f64, n: usize) -> Vec<f64> {
     let mut rng = rand::thread_rng();
     let normal = Normal::new(mean, sd);
 
@@ -128,7 +128,7 @@ pub fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
 /// let pair_of_paths = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4,
 ///     0.25, 100, payoffs::montecarlo::VarianceReduction::ATV);
 /// ```
-pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
+pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
     vr: VarianceReduction ) -> Path<f64> {
     let sd = (t/n as f64).sqrt();
     let normal_samples = draw_normal(0.0, sd, n);
@@ -142,6 +142,31 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: u32,
             Path::Antithetic((path, anti))
         }
     }
+}
+
+/// Generate a vector of Path assuming geometric brownian motion
+/// given the type of variance reduction scheme
+///
+/// #Argument
+/// * `s0` - initial stock price at time 0
+/// * `r` - interest rate
+/// * `q` - convenience yield (absorbs any cost or yield of holding the asset)
+/// * `v` - volatility e.g. 0.4 is 40 vol points (per annum)
+/// * `t` - number of years e.g. 0.25 is quarter of a year
+/// * `n` - number of points in the path
+/// * `vr` - variance reduction scheme
+/// * `num_paths` - number of paths to generate
+///
+/// #Example
+/// ```
+/// let paths = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4, 0.25,
+///     100, payoffs::montecarlo::VarianceReduction::None);
+/// ```
+pub fn gbm_paths( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
+    vr: VarianceReduction, num_paths: usize ) -> Vec<Path<f64>> {
+
+    (0..num_paths).map(|_| gbm_path(s0, r, q, v, t, n, vr)).collect()
+
 }
 
 /// A boxed closure representing the vanilla european payoff function
@@ -281,8 +306,7 @@ mod test {
     use option::BarrierInOut::*;
     use montecarlo::monte_carlo;
     use montecarlo::VarianceReduction::*;
-    use montecarlo::gbm_path;
-    use montecarlo::Path;
+    use montecarlo::gbm_paths;
     use montecarlo::draw_normal;
     use montecarlo::european_payoff;
     use montecarlo::barrier_payoff;
@@ -300,8 +324,7 @@ mod test {
         let m = 5000000;
 
         let now = time::precise_time_s();
-        let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 1,
-            ATV)).collect();
+        let paths = gbm_paths(s0, r, q, v, t, 1, ATV, m);
 
         let (estimate, _, err) =
             monte_carlo(&paths, european_payoff(Call, r, t, k));
@@ -353,8 +376,7 @@ mod test {
         let m = 10000000;
 
         let now = time::precise_time_s();
-        let paths: Vec<Path<f64>> = (0..m).map(|_| gbm_path(s0, r, q, v, t, 3,
-            ATV)).collect();
+        let paths = gbm_paths(s0, r, q, v, t, 3, ATV, m);
 
         let (estimate, _, _) =
             monte_carlo(&paths, barrier_payoff(Up, Out, Call, r, t, barrier, k));
