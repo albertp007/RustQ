@@ -300,6 +300,7 @@ pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
 #[cfg(test)]
 mod test {
     extern crate time;
+    extern crate num_cpus;
     use option::OptionType::*;
     use option::black_scholes;
     use option::BarrierUpDown::*;
@@ -384,6 +385,41 @@ mod test {
 
         // No easy way to test this, hard-coding a value of 3.30 for now which
         // is obtained from the F# deep dives book
+        assert_eq!( true, equal_within(estimate, 3.30, 0.01) );
+    }
+
+    #[test]
+    fn test_mc_up_out_call_mt() {
+        use std::thread;
+        let s0 = 100.0;
+        let r = 0.02;
+        let q = 0.0;
+        let v = 0.4;
+        let t = 0.25;
+        let k = 100.0;
+        let barrier = 125.0;
+        let m = 10000000;
+        let num_threads = 10;
+
+        let now = time::precise_time_s();
+        let mut threads = vec![];
+        for _ in 0..num_threads {
+            threads.push(thread::spawn( move || {
+                let num_paths = m/num_threads;
+                let paths = gbm_paths(s0, r, q, v, t, 3, ATV, num_paths);
+                let (estimate, _, _) =
+                    monte_carlo(&paths, barrier_payoff(Up, Out, Call, r, t,
+                        barrier, k));
+                estimate * num_paths as f64
+            }));
+        }
+
+        let total = threads.into_iter().fold(0.0, |acc, t| {
+            acc + t.join().unwrap() } );
+        println!("{} secs", time::precise_time_s() - now);
+        let estimate = total/m as f64;
+        println!("result: {}", estimate);
+        println!("number of cores: {}", num_cpus::get());
         assert_eq!( true, equal_within(estimate, 3.30, 0.01) );
     }
 }

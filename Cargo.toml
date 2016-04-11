@@ -7,3 +7,4 @@ authors = ["Albert Pang <albert.pang@me.com>"]
 rand = "0.3.14"
 time = "0.1"
 probability = "0.12.4"
+num_cpus = "0.2.11"
