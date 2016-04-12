@@ -38,6 +38,10 @@ pub enum Path<T> {
 pub type PayoffFunc = Box<Fn(&Vec<f64>)->f64>;
 use montecarlo::VarianceReduction::*;
 
+pub trait PathGenerator<T> {
+    fn generate_paths(&self, n: usize) -> Vec<Path<T>>;
+}
+
 /// Draw samples from a normal distribution with the mean and standard deviation
 /// specified in the arguments
 ///
@@ -169,6 +173,33 @@ pub fn gbm_paths( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
 
 }
 
+#[derive(Clone, Copy, Debug)]
+struct GbmPathGenerator {
+    s0: f64,
+    r: f64,
+    q: f64,
+    v: f64,
+    t: f64,
+    num_points: usize,
+    vr: VarianceReduction,
+}
+
+impl PathGenerator<f64> for GbmPathGenerator {
+    fn generate_paths(&self, n: usize) -> Vec<Path<f64>> {
+        gbm_paths( self.s0, self.r, self.q, self.v, self.t, self.num_points,
+            self.vr, n)
+    }
+}
+
+impl GbmPathGenerator {
+    pub fn new( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
+        vr: VarianceReduction ) -> GbmPathGenerator {
+
+        GbmPathGenerator { s0: s0, r: r, q: q, v: v, t: t, num_points: n,
+            vr: vr }
+    }
+}
+
 /// A boxed closure representing the vanilla european payoff function
 ///
 /// # Argument
@@ -221,7 +252,7 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 ///         payoffs::montecarlo::VarianceReduction::ATV)).collect();
 ///
 /// let (estimate, _, _) =
-///     payoffs::montecarlo::monte_carlo(&paths,
+///     payoffs::montecarlo::monte_carlo_0(&paths,
 ///         payoffs::montecarlo::barrier_payoff(
 ///             payoffs::option::BarrierUpDown::Up,
 ///             payoffs::option::BarrierInOut::Out,
@@ -273,13 +304,13 @@ pub fn barrier_payoff(barrier_updown: BarrierUpDown,
 ///     .collect();
 ///
 /// let (estimate, _, _) =
-///     payoffs::montecarlo::monte_carlo(&paths,
+///     payoffs::montecarlo::monte_carlo_0(&paths,
 ///         payoffs::montecarlo::european_payoff(
 ///         payoffs::option::OptionType::Call, r, t, k));
 ///
 /// println!("Estimate: {}", estimate);
 /// ```
-pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
+pub fn monte_carlo_0(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
 {
     let payoffs: Vec<f64> = paths.iter().map( |path| {
         match path {
@@ -297,6 +328,13 @@ pub fn monte_carlo(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
     (estimate, var, stderr)
 }
 
+pub fn monte_carlo<G>( path_gen: G, n: usize, f: PayoffFunc) -> (f64, f64, f64)
+where G: PathGenerator<f64>
+{
+    let paths = path_gen.generate_paths( n );
+    monte_carlo_0( &paths, f )
+}
+
 #[cfg(test)]
 mod test {
     extern crate time;
@@ -306,8 +344,8 @@ mod test {
     use option::BarrierUpDown::*;
     use option::BarrierInOut::*;
     use montecarlo::monte_carlo;
+    use montecarlo::GbmPathGenerator;
     use montecarlo::VarianceReduction::*;
-    use montecarlo::gbm_paths;
     use montecarlo::draw_normal;
     use montecarlo::european_payoff;
     use montecarlo::barrier_payoff;
@@ -325,10 +363,10 @@ mod test {
         let m = 5000000;
 
         let now = time::precise_time_s();
-        let paths = gbm_paths(s0, r, q, v, t, 1, ATV, m);
 
         let (estimate, _, err) =
-            monte_carlo(&paths, european_payoff(Call, r, t, k));
+            monte_carlo(GbmPathGenerator::new(s0, r, q, v, t, 1, ATV),
+                m, european_payoff(Call, r, t, k));
 
         println!("{} secs", time::precise_time_s() - now);
 
@@ -377,10 +415,12 @@ mod test {
         let m = 10000000;
 
         let now = time::precise_time_s();
-        let paths = gbm_paths(s0, r, q, v, t, 3, ATV, m);
 
         let (estimate, _, _) =
-            monte_carlo(&paths, barrier_payoff(Up, Out, Call, r, t, barrier, k));
+            monte_carlo(
+                GbmPathGenerator::new(s0, r, q, v, t, 3, ATV),
+                m, barrier_payoff(Up, Out, Call, r, t, barrier, k));
+
         println!("{} secs", time::precise_time_s() - now);
 
         // No easy way to test this, hard-coding a value of 3.30 for now which
@@ -406,10 +446,12 @@ mod test {
         for _ in 0..num_threads {
             threads.push(thread::spawn( move || {
                 let num_paths = m/num_threads;
-                let paths = gbm_paths(s0, r, q, v, t, 3, ATV, num_paths);
                 let (estimate, _, _) =
-                    monte_carlo(&paths, barrier_payoff(Up, Out, Call, r, t,
-                        barrier, k));
+                    monte_carlo(
+                        GbmPathGenerator::new( s0, r, q, v, t, 3, ATV ),
+                        num_paths,
+                        barrier_payoff(Up, Out, Call, r, t, barrier, k)
+                    );
                 (estimate * num_paths as f64, num_paths)
             }));
         }
