@@ -52,7 +52,9 @@ pub trait PathGenerator<T> {
 ///
 /// # Example
 /// ```
-/// let samples = payoffs::montecarlo::draw_normal( 0.0, 1.0, 100 );
+/// use payoffs::montecarlo::draw_normal;
+///
+/// let samples = draw_normal( 0.0, 1.0, 100 );
 /// println!( "{:?}", samples );
 /// ```
 pub fn draw_normal(mean: f64, sd: f64, n: usize) -> Vec<f64> {
@@ -76,12 +78,13 @@ pub fn draw_normal(mean: f64, sd: f64, n: usize) -> Vec<f64> {
 ///
 /// #Example
 /// ```
+/// use payoffs::montecarlo::draw_normal;
+/// use payoffs::montecarlo::gbm_samples;
+///
 /// let t = 0.25;
 /// let n = 100;
-/// let normal_samples = payoffs::montecarlo::draw_normal( 0.0,
-///     (t/n as f64).sqrt(), n);
-/// let samples = payoffs::montecarlo::gbm_samples(100.0, 0.02, 0.0, 0.4, 0.25,
-///     &normal_samples);
+/// let normal_samples = draw_normal( 0.0, (t/n as f64).sqrt(), n);
+/// let samples = gbm_samples(100.0, 0.02, 0.0, 0.4, 0.25, &normal_samples);
 /// println!("{:?}", samples);
 /// ```
 pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
@@ -105,8 +108,11 @@ pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
 ///
 /// #Example
 /// ```
-/// let normal_samples = payoffs::montecarlo::draw_normal( 0.0, 1.0, 100 );
-/// let anti = payoffs::montecarlo::make_antithetic( &normal_samples );
+/// use payoffs::montecarlo::draw_normal;
+/// use payoffs::montecarlo::make_antithetic;
+///
+/// let normal_samples = draw_normal( 0.0, 1.0, 100 );
+/// let anti = make_antithetic( &normal_samples );
 /// println!("{:?}", anti);
 /// ```
 pub fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
@@ -127,10 +133,11 @@ pub fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
 ///
 /// #Example
 /// ```
-/// let single_path = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4, 0.25,
-///     100, payoffs::montecarlo::VarianceReduction::None);
-/// let pair_of_paths = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4,
-///     0.25, 100, payoffs::montecarlo::VarianceReduction::ATV);
+/// use payoffs::montecarlo::gbm_path;
+/// use payoffs::montecarlo::VarianceReduction::*;
+///
+/// let single_path = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, None);
+/// let pair_of_paths = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, ATV);
 /// ```
 pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
     vr: VarianceReduction ) -> Path<f64> {
@@ -163,8 +170,10 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
 ///
 /// #Example
 /// ```
-/// let paths = payoffs::montecarlo::gbm_path(100.0, 0.02, 0.0, 0.4, 0.25,
-///     100, payoffs::montecarlo::VarianceReduction::None);
+/// use payoffs::montecarlo::gbm_path;
+/// use payoffs::montecarlo::VarianceReduction::*;
+///
+/// let paths = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, None);
 /// ```
 pub fn gbm_paths( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
     vr: VarianceReduction, num_paths: usize ) -> Vec<Path<f64>> {
@@ -174,7 +183,7 @@ pub fn gbm_paths( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct GbmPathGenerator {
+pub struct GbmPathGenerator {
     s0: f64,
     r: f64,
     q: f64,
@@ -237,6 +246,14 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 /// barrier 125 and strike 100, with a monthly observation i.e. 3 observations
 ///
 /// ```
+/// use payoffs::montecarlo::GbmPathGenerator;
+/// use payoffs::montecarlo::barrier_payoff;
+/// use payoffs::montecarlo::monte_carlo;
+/// use payoffs::montecarlo::VarianceReduction::*;
+/// use payoffs::option::OptionType::*;
+/// use payoffs::option::BarrierInOut::*;
+/// use payoffs::option::BarrierUpDown::*;
+///
 /// let s0 = 100.0;
 /// let r = 0.02;
 /// let q = 0.0;
@@ -247,16 +264,9 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 /// let m = 10000000;
 /// let obs = 3;
 ///
-/// let paths: Vec<payoffs::montecarlo::Path<f64>> =
-///     (0..m).map(|_| payoffs::montecarlo::gbm_path(s0, r, q, v, t, obs,
-///         payoffs::montecarlo::VarianceReduction::ATV)).collect();
-///
 /// let (estimate, _, _) =
-///     payoffs::montecarlo::monte_carlo_0(&paths,
-///         payoffs::montecarlo::barrier_payoff(
-///             payoffs::option::BarrierUpDown::Up,
-///             payoffs::option::BarrierInOut::Out,
-///             payoffs::option::OptionType::Call, r, t, barrier, k));
+///     monte_carlo(GbmPathGenerator::new(s0, r, q, v, t, obs, ATV), m,
+///         barrier_payoff(Up, Out, Call, r, t, barrier, k));
 /// ```
 pub fn barrier_payoff(barrier_updown: BarrierUpDown,
     barrier_inout: BarrierInOut, opt_type: OptionType,
@@ -290,6 +300,13 @@ pub fn barrier_payoff(barrier_updown: BarrierUpDown,
 ///
 /// # Example
 /// ```
+/// use payoffs::montecarlo::Path;
+/// use payoffs::montecarlo::gbm_path;
+/// use payoffs::montecarlo::VarianceReduction::*;
+/// use payoffs::montecarlo::monte_carlo_0;
+/// use payoffs::montecarlo::european_payoff;
+/// use payoffs::option::OptionType::*;
+///
 /// let s0 = 100.0;
 /// let r = 0.02;
 /// let q = 0.0;
@@ -298,15 +315,12 @@ pub fn barrier_payoff(barrier_updown: BarrierUpDown,
 /// let k = 100.0;
 /// let m = 5000000;
 ///
-/// let paths: Vec<payoffs::montecarlo::Path<f64>> = (0..m)
-///     .map(|_| payoffs::montecarlo::gbm_path( s0, r, q, v, t, 1,
-///         payoffs::montecarlo::VarianceReduction::ATV))
+/// let paths: Vec<Path<f64>> = (0..m)
+///     .map(|_| gbm_path( s0, r, q, v, t, 1, ATV))
 ///     .collect();
 ///
-/// let (estimate, _, _) =
-///     payoffs::montecarlo::monte_carlo_0(&paths,
-///         payoffs::montecarlo::european_payoff(
-///         payoffs::option::OptionType::Call, r, t, k));
+/// let (estimate, _, _) = monte_carlo_0(&paths,
+///     european_payoff( Call, r, t, k));
 ///
 /// println!("Estimate: {}", estimate);
 /// ```
