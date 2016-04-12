@@ -246,9 +246,7 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 /// barrier 125 and strike 100, with a monthly observation i.e. 3 observations
 ///
 /// ```
-/// use payoffs::montecarlo::GbmPathGenerator;
-/// use payoffs::montecarlo::barrier_payoff;
-/// use payoffs::montecarlo::monte_carlo;
+/// use payoffs::montecarlo::*;
 /// use payoffs::montecarlo::VarianceReduction::*;
 /// use payoffs::option::OptionType::*;
 /// use payoffs::option::BarrierInOut::*;
@@ -357,13 +355,8 @@ mod test {
     use option::black_scholes;
     use option::BarrierUpDown::*;
     use option::BarrierInOut::*;
-    use montecarlo::monte_carlo;
-    use montecarlo::GbmPathGenerator;
+    use montecarlo::*;
     use montecarlo::VarianceReduction::*;
-    use montecarlo::draw_normal;
-    use montecarlo::european_payoff;
-    use montecarlo::barrier_payoff;
-    use montecarlo::make_antithetic;
     use util::equal_within;
 
     #[test]
