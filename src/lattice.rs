@@ -90,7 +90,7 @@ impl Binomial {
         let n = self.period as isize;
         let mut v: Vec<f64> = Vec::with_capacity(2*self.period+1);
         for i in (-n)..(n+1) {
-            v.push( self.s0* (i as f64*self.up).exp() );
+            v.push( self.s0 * self.up.powi(i as i32) );
         }
 
         Binomial::iter_nodes(self.period, &mut |(_, j)| {
@@ -107,6 +107,21 @@ impl Binomial {
         });
     }
 
+    #[allow(dead_code)]
+    fn price<F>(&mut self, payoff: F) -> f64
+    where F: Fn((isize, isize, isize))->f64
+    {
+        let mut j = -(self.period as isize);
+        let (_, mut last_period_nodes) =
+            self.values.split_at_mut(self.num_nodes-self.period-1);
+        for mut states in last_period_nodes.iter_mut() {
+            for (state, value) in states.iter_mut() {
+                *value = payoff((self.period as isize, j, *state));
+                j += 2;
+            }
+        }
+        0.0
+    }
 
 }
 
@@ -121,7 +136,7 @@ mod test {
     pub fn test_binomial_populate_and_get_asset_price() {
 
         fn expected_price(s0: f64, up: f64, j: isize) -> f64 {
-            s0 * (up * j as f64).exp()
+            s0 * up.powi( j as i32 )
         }
 
         let s0 = 50.0;
@@ -195,6 +210,36 @@ mod test {
         expected[3].insert(2, 0.0);
         expected[3].insert(3, 0.0);
         expected[4].insert(4, 0.0);
+
+        assert_eq!(last_period_nodes, expected.as_slice());
+    }
+
+    #[test]
+    pub fn test_payoff_function() {
+        let s0 = 50.0;
+        let r = 0.05;
+        let q = 0.0;
+        let v = 0.3;
+        let t = 0.25;
+        let strike = 50.0;
+        let period = 4;
+
+        let mut grid =
+            Binomial::new(s0, r, q, v, t, period, default_state_func);
+        let up = grid.up;
+        grid.price(|(_, j, _)| {
+            (s0 * up.powi( j as i32 ) - strike).max(0.0)
+        });
+
+        let (_, last_period_nodes) =
+            grid.values.split_at(grid.num_nodes-grid.period-1);
+        let mut expected: Vec<HashMap<isize, f64>> = Vec::new();
+        for i in 0..5 {
+            let j = (i-2)*2;
+            let mut map = HashMap::new();
+            map.insert(0, (s0 * up.powi( j as i32 ) - strike).max(0.0));
+            expected.push(map);
+        }
 
         assert_eq!(last_period_nodes, expected.as_slice());
     }
