@@ -16,7 +16,7 @@ pub struct Binomial {
     values: Vec<HashMap<isize, f64>>,
 }
 
-pub fn default_state_func((_, _): (isize, isize), _: isize, _: isize) -> isize {
+pub fn default_state_func((_, _, _): (isize, isize, isize), _: isize) -> isize {
     0
 }
 
@@ -27,29 +27,6 @@ impl Binomial {
 
     pub fn to_index(i: isize, j: isize) -> usize {
         ((i*i + 2*i + j)/2) as usize
-    }
-
-    pub fn get_asset_price(&self, i: isize, j: isize) -> f64 {
-        self.asset_prices[Binomial::to_index(i, j)]
-    }
-
-    pub fn new(s0: f64, r: f64, q: f64, v: f64, t: f64, period: usize)
-        -> Binomial {
-        let num_nodes = Binomial::calc_num_nodes(period);
-        let dt = t/period as f64;
-        let u = v * dt.sqrt();
-        let up = u.exp();
-        let down = 1.0/up;
-        let mut grid =
-            Binomial {
-                s0: s0, r: r, q: q, v: v, t: t, period: period,
-                num_nodes: num_nodes,
-                asset_prices: Vec::with_capacity(num_nodes),
-                dt: dt, up: up, down: down,
-                values: Vec::with_capacity(num_nodes),
-            };
-        grid.build( default_state_func );
-        grid
     }
 
     fn iter_nodes<F>(num_periods: usize, f: &mut F)
@@ -64,12 +41,35 @@ impl Binomial {
         }
     }
 
+    pub fn get_asset_price(&self, i: isize, j: isize) -> f64 {
+        self.asset_prices[Binomial::to_index(i, j)]
+    }
+
+    pub fn new<F>(s0: f64, r: f64, q: f64, v: f64, t: f64, period: usize, f: F)
+        -> Binomial where F: Fn((isize, isize, isize), isize)->isize {
+        let num_nodes = Binomial::calc_num_nodes(period);
+        let dt = t/period as f64;
+        let u = v * dt.sqrt();
+        let up = u.exp();
+        let down = 1.0/up;
+        let mut grid =
+            Binomial {
+                s0: s0, r: r, q: q, v: v, t: t, period: period,
+                num_nodes: num_nodes,
+                asset_prices: Vec::with_capacity(num_nodes),
+                dt: dt, up: up, down: down,
+                values: Vec::with_capacity(num_nodes),
+            };
+        grid.build( f );
+        grid
+    }
+
     fn set_state_value(&mut self, (i, j, k): (isize, isize, isize), v: f64) {
         self.values[Binomial::to_index(i, j)].insert(k, v);
     }
 
     fn forward_states<F>(&mut self, (i, j):(isize, isize), f: &F)
-        where F: Fn((isize, isize), isize, isize)->isize
+        where F: Fn((isize, isize, isize), isize)->isize
     {
         let current_index = Binomial::to_index(i, j);
         // i is the time index, always larger than 0, okay to cast to usize
@@ -77,15 +77,15 @@ impl Binomial {
         let up_index = down_index + 1;
         let (left, mut right) = self.values.split_at_mut(current_index+1);
         for &k in left.last().unwrap().keys() {
-            let up_state = f((i, j), k, j+1);
-            let down_state = f((i, j), k, j-1);
+            let up_state = f((i, j, k), j+1);
+            let down_state = f((i, j, k), j-1);
             right[up_index-current_index-1].insert(up_state, 0.0);
             right[down_index-current_index-1].insert(down_state, 0.0);
         }
     }
 
     fn build<F>(&mut self, f: F)
-        where F: Fn((isize, isize), isize, isize)->isize {
+        where F: Fn((isize, isize, isize), isize)->isize {
 
         let n = self.period as isize;
         let mut v: Vec<f64> = Vec::with_capacity(2*self.period+1);
@@ -106,12 +106,16 @@ impl Binomial {
             self.forward_states((i, j), &f);
         });
     }
+
+
 }
 
 #[cfg(test)]
 mod test {
     extern crate time;
-    use lattice::Binomial;
+    use lattice::*;
+    use std::cmp;
+    use std::collections::HashMap;
 
     #[test]
     pub fn test_binomial_populate_and_get_asset_price() {
@@ -126,7 +130,7 @@ mod test {
         let v = 0.3;
         let t = 2.0;
         let period = 5;
-        let grid = Binomial::new(s0, r, q, v, t, period);
+        let grid = Binomial::new(s0, r, q, v, t, period, default_state_func);
 
         let n = grid.period as isize;
         for i in 0..(n+1) {
@@ -153,9 +157,45 @@ mod test {
         let period = 3000;
 
         let now = time::precise_time_s();
-        let mut grid = Binomial::new(s0, r, q, v, t, period);
+        let mut _grid = Binomial::new(s0, r, q, v, t, period,
+            default_state_func);
         println!("Creation time:  {}", time::precise_time_s() - now);
 
         assert!( false );
+    }
+
+    #[test]
+    pub fn test_state_transition() {
+        let s0 = 50.0;
+        let r = 0.05;
+        let q = 0.0;
+        let v = 0.3;
+        let t = 2.0;
+        let period = 4;
+
+        fn lookback( (_, _, k): (isize, isize, isize), to_j: isize) -> isize
+        {
+            cmp::max(to_j, k)
+        }
+
+        let grid = Binomial::new(s0, r, q, v, t, period, lookback);
+        let (_, last_period_nodes) =
+            grid.values.split_at(grid.num_nodes-grid.period-1);
+
+        let mut expected: Vec<HashMap<isize, f64>> = Vec::new();
+        for _ in 0..5 {
+            expected.push(HashMap::new());
+        }
+        expected[0].insert(0, 0.0);
+        expected[1].insert(0, 0.0);
+        expected[1].insert(1, 0.0);
+        expected[2].insert(0, 0.0);
+        expected[2].insert(1, 0.0);
+        expected[2].insert(2, 0.0);
+        expected[3].insert(2, 0.0);
+        expected[3].insert(3, 0.0);
+        expected[4].insert(4, 0.0);
+
+        assert_eq!(last_period_nodes, expected.as_slice());
     }
 }
