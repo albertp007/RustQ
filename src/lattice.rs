@@ -16,8 +16,11 @@ pub struct Binomial {
     values: Vec<HashMap<isize, f64>>,
 }
 
-pub fn default_state_func((_, _, _): (isize, isize, isize), _: isize) -> isize {
-    0
+pub type StateTransitionFunc = Box<Fn((isize, isize, isize), isize)->isize>;
+pub type PayoffFunc = Box<Fn((isize, isize, isize))->f64>;
+
+pub fn default_state_func() -> StateTransitionFunc {
+    Box::new( |(_, _, _): (isize, isize, isize), _: isize| { 0 } )
 }
 
 impl Binomial {
@@ -45,8 +48,8 @@ impl Binomial {
         self.asset_prices[Binomial::to_index(i, j)]
     }
 
-    pub fn new<F>(s0: f64, r: f64, q: f64, v: f64, t: f64, period: usize, f: F)
-        -> Binomial where F: Fn((isize, isize, isize), isize)->isize {
+    pub fn new(s0: f64, r: f64, q: f64, v: f64, t: f64, period: usize,
+        f: &StateTransitionFunc) -> Binomial {
         let num_nodes = Binomial::calc_num_nodes(period);
         let dt = t/period as f64;
         let u = v * dt.sqrt();
@@ -68,8 +71,7 @@ impl Binomial {
         self.values[Binomial::to_index(i, j)].insert(k, v);
     }
 
-    fn forward_states<F>(&mut self, (i, j):(isize, isize), f: &F)
-        where F: Fn((isize, isize, isize), isize)->isize
+    fn forward_states(&mut self, (i, j):(isize, isize), f: &StateTransitionFunc)
     {
         let current_index = Binomial::to_index(i, j);
         // i is the time index, always larger than 0, okay to cast to usize
@@ -84,9 +86,7 @@ impl Binomial {
         }
     }
 
-    fn build<F>(&mut self, f: F)
-        where F: Fn((isize, isize, isize), isize)->isize {
-
+    fn build(&mut self, f: &StateTransitionFunc) {
         let n = self.period as isize;
         let mut v: Vec<f64> = Vec::with_capacity(2*self.period+1);
         for i in (-n)..(n+1) {
@@ -103,14 +103,12 @@ impl Binomial {
 
         // run forward-shooting
         Binomial::iter_nodes(self.period-1, &mut |(i, j)| {
-            self.forward_states((i, j), &f);
+            self.forward_states((i, j), f);
         });
     }
 
     #[allow(dead_code)]
-    fn price<F>(&mut self, payoff: F) -> f64
-    where F: Fn((isize, isize, isize))->f64
-    {
+    fn price(&mut self, payoff: &PayoffFunc) -> f64 {
         let mut j = -(self.period as isize);
         let (_, mut last_period_nodes) =
             self.values.split_at_mut(self.num_nodes-self.period-1);
@@ -122,7 +120,6 @@ impl Binomial {
         }
         0.0
     }
-
 }
 
 #[cfg(test)]
@@ -145,7 +142,7 @@ mod test {
         let v = 0.3;
         let t = 2.0;
         let period = 5;
-        let grid = Binomial::new(s0, r, q, v, t, period, default_state_func);
+        let grid = Binomial::new(s0, r, q, v, t, period, &default_state_func());
 
         let n = grid.period as isize;
         for i in 0..(n+1) {
@@ -173,7 +170,7 @@ mod test {
 
         let now = time::precise_time_s();
         let mut _grid = Binomial::new(s0, r, q, v, t, period,
-            default_state_func);
+            &default_state_func());
         println!("Creation time:  {}", time::precise_time_s() - now);
 
         assert!( false );
@@ -188,12 +185,12 @@ mod test {
         let t = 2.0;
         let period = 4;
 
-        fn lookback( (_, _, k): (isize, isize, isize), to_j: isize) -> isize
-        {
-            cmp::max(to_j, k)
-        }
+        let lookback: StateTransitionFunc = Box::new(
+            |(_, _, k): (isize, isize, isize), to_j: isize| {
+                cmp::max(to_j, k)
+        } );
 
-        let grid = Binomial::new(s0, r, q, v, t, period, lookback);
+        let grid = Binomial::new(s0, r, q, v, t, period, &lookback);
         let (_, last_period_nodes) =
             grid.values.split_at(grid.num_nodes-grid.period-1);
 
@@ -225,11 +222,16 @@ mod test {
         let period = 4;
 
         let mut grid =
-            Binomial::new(s0, r, q, v, t, period, default_state_func);
+            Binomial::new(s0, r, q, v, t, period, &default_state_func());
         let up = grid.up;
-        grid.price(|(_, j, _)| {
-            (s0 * up.powi( j as i32 ) - strike).max(0.0)
-        });
+
+        let european_payoff: PayoffFunc = Box::new(
+            move |(_, j, _)| {
+                (s0 * up.powi( j as i32 ) - strike).max(0.0)
+            }
+        );
+
+        grid.price(&european_payoff);
 
         let (_, last_period_nodes) =
             grid.values.split_at(grid.num_nodes-grid.period-1);
