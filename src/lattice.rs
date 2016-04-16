@@ -18,7 +18,7 @@ pub struct Binomial {
 }
 
 pub type StateTransitionFunc = Box<Fn((isize, isize, isize), isize)->isize>;
-pub type PayoffFunc = Box<Fn((isize, isize, isize))->f64>;
+pub type PayoffFunc = Box<Fn(&Binomial, (isize, isize, isize))->f64>;
 
 pub fn default_state_func() -> StateTransitionFunc {
     Box::new( |(_, _, _): (isize, isize, isize), _: isize| { 0 } )
@@ -112,7 +112,7 @@ impl Binomial {
         Binomial::iter_nodes(n, n, &mut |(i, j)| {
             let index = Binomial::to_index(i, j);
             for (&k, v) in self.values[index].borrow_mut().iter_mut() {
-                let value = payoff((i, j, k));
+                let value = payoff(&self, (i, j, k));
                 *v = value;
             }
         });
@@ -234,8 +234,9 @@ mod test {
         let up = grid.up;
 
         let european_payoff: PayoffFunc = Box::new(
-            move |(_, j, _)| {
-                (s0 * up.powi( j as i32 ) - strike).max(0.0)
+            move |grid, (i, j, _)| {
+                let underlying_price = grid.get_asset_price(i, j);
+                (underlying_price - strike).max(0.0)
             }
         );
 
