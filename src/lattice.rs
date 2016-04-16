@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub struct Binomial {
@@ -13,7 +14,7 @@ pub struct Binomial {
     asset_prices: Vec<f64>,
     up: f64,
     down: f64,
-    values: Vec<HashMap<isize, f64>>,
+    values: Vec<RefCell<HashMap<isize, f64>>>,
 }
 
 pub type StateTransitionFunc = Box<Fn((isize, isize, isize), isize)->isize>;
@@ -32,10 +33,10 @@ impl Binomial {
         ((i*i + 2*i + j)/2) as usize
     }
 
-    fn iter_nodes<F>(num_periods: usize, f: &mut F)
+    fn iter_nodes<F>(start: isize, end: isize, f: &mut F)
     where F: FnMut((isize, isize))
     {
-        for i in 0..(num_periods as isize+1) {
+        for i in start..(end+1) {
             for ii in 0..(i+1) {
                 // skip feature is unstable as of writing
                 let j = -i + ii * 2;
@@ -68,7 +69,7 @@ impl Binomial {
     }
 
     fn set_state_value(&mut self, (i, j, k): (isize, isize, isize), v: f64) {
-        self.values[Binomial::to_index(i, j)].insert(k, v);
+        self.values[Binomial::to_index(i, j)].borrow_mut().insert(k, v);
     }
 
     fn forward_states(&mut self, (i, j):(isize, isize), f: &StateTransitionFunc)
@@ -77,12 +78,11 @@ impl Binomial {
         // i is the time index, always larger than 0, okay to cast to usize
         let down_index = current_index + i as usize + 1;
         let up_index = down_index + 1;
-        let (left, mut right) = self.values.split_at_mut(current_index+1);
-        for &k in left.last().unwrap().keys() {
+        for &k in self.values[current_index].borrow().keys() {
             let up_state = f((i, j, k), j+1);
             let down_state = f((i, j, k), j-1);
-            right[up_index-current_index-1].insert(up_state, 0.0);
-            right[down_index-current_index-1].insert(down_state, 0.0);
+            self.values[down_index].borrow_mut().insert(down_state, 0.0);
+            self.values[up_index].borrow_mut().insert(up_state, 0.0);
         }
     }
 
@@ -93,31 +93,34 @@ impl Binomial {
             v.push( self.s0 * self.up.powi(i as i32) );
         }
 
-        Binomial::iter_nodes(self.period, &mut |(_, j)| {
+        Binomial::iter_nodes(0, n, &mut |(_, j)| {
             self.asset_prices.push( v[(j+n) as usize] );
-            self.values.push( HashMap::new() );
+            self.values.push( RefCell::new(HashMap::new()) );
         });
 
         // initialize the default initial state value
         self.set_state_value((0, 0, 0), 0.0);
 
         // run forward-shooting
-        Binomial::iter_nodes(self.period-1, &mut |(i, j)| {
+        Binomial::iter_nodes(0, n-1, &mut |(i, j)| {
             self.forward_states((i, j), f);
+        });
+    }
+
+    fn calc_terminal(&mut self, payoff: &PayoffFunc) {
+        let n = self.period as isize;
+        Binomial::iter_nodes(n, n, &mut |(i, j)| {
+            let index = Binomial::to_index(i, j);
+            for (&k, v) in self.values[index].borrow_mut().iter_mut() {
+                let value = payoff((i, j, k));
+                *v = value;
+            }
         });
     }
 
     #[allow(dead_code)]
     fn price(&mut self, payoff: &PayoffFunc) -> f64 {
-        let mut j = -(self.period as isize);
-        let (_, mut last_period_nodes) =
-            self.values.split_at_mut(self.num_nodes-self.period-1);
-        for mut states in last_period_nodes.iter_mut() {
-            for (state, value) in states.iter_mut() {
-                *value = payoff((self.period as isize, j, *state));
-                j += 2;
-            }
-        }
+        self.calc_terminal(payoff);
         0.0
     }
 }
@@ -208,7 +211,12 @@ mod test {
         expected[3].insert(3, 0.0);
         expected[4].insert(4, 0.0);
 
-        assert_eq!(last_period_nodes, expected.as_slice());
+        let results: Vec<HashMap<isize, f64>> = last_period_nodes.iter().map(
+            |cell| {
+                cell.borrow().clone()
+            }).collect();
+
+        assert_eq!(results.as_slice(), expected.as_slice());
     }
 
     #[test]
@@ -243,6 +251,11 @@ mod test {
             expected.push(map);
         }
 
-        assert_eq!(last_period_nodes, expected.as_slice());
+        let results: Vec<HashMap<isize, f64>> = last_period_nodes.iter().map(
+            |cell| {
+                cell.borrow().clone()
+            }).collect();
+
+        assert_eq!(results.as_slice(), expected.as_slice());
     }
 }
