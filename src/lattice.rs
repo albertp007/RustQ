@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::cell::RefCell;
+use option::OptionType::*;
+use option::*;
 
 /// Type alias for state transition function in the grid.  This determines
 /// the state to evolve to, given the current state k in node (i, j) and going
@@ -103,6 +105,42 @@ pub fn default_node_value() -> NodeValueFunc {
     Box::new( |_, (_, _, _), induced_value| {
         induced_value
     })
+}
+
+/// A payoff function for vanilla call and put options
+/// # Arguments
+/// * `opt_type` - OptionType, either Call or Put
+/// * `strike` - strike price
+///
+/// # Example
+/// ```
+/// use payoffs::option::*;
+/// use payoffs::option::OptionType::*;
+/// use payoffs::lattice::*;
+///
+/// let s0 = 50.0;
+/// let r = 0.05;
+/// let q = 0.0;
+/// let v = 0.3;
+/// let t = 0.25;
+/// let strike = 50.0;
+/// let period = 4;
+///
+/// let mut grid =
+///     Binomial::new(s0, r, q, v, t, period, default_state_func(), 0);
+///
+/// grid.price(&vanilla_payoff(Call, strike), &default_node_value());
+/// ```
+pub fn vanilla_payoff(opt_type: OptionType, strike: f64) -> PayoffFunc {
+    Box::new(
+        move |grid, (i, j, _)| {
+            let underlying_price = grid.get_asset_price(i, j);
+            let intrinsic = underlying_price - strike;
+            match opt_type {
+                Call => intrinsic.max(0.0),
+                Put => (-intrinsic).max(0.0)
+            }
+        })
 }
 
 impl Binomial {
@@ -447,14 +485,7 @@ mod test {
             Binomial::new(s0, r, q, v, t, period, default_state_func(), 0);
         let up = grid.up;
 
-        let european_payoff: PayoffFunc = Box::new(
-            move |grid, (i, j, _)| {
-                let underlying_price = grid.get_asset_price(i, j);
-                (underlying_price - strike).max(0.0)
-            }
-        );
-
-        grid.price(&european_payoff, &default_node_value());
+        grid.price(&vanilla_payoff(Call, strike), &default_node_value());
 
         let (_, last_period_nodes) =
             grid.values.split_at(grid.num_nodes-grid.period-1);
@@ -484,17 +515,12 @@ mod test {
         let strike = 50.0;
         let period = 1000;
 
-        let european_payoff: PayoffFunc = Box::new(
-            move |grid, (i, j, _)| {
-                let underlying_price = grid.get_asset_price(i, j);
-                (underlying_price - strike).max(0.0)
-            }
-        );
         let now = time::precise_time_s();
         let mut grid =
             Binomial::new(s0, r, q, v, t, period, default_state_func(), 0);
 
-        let price = grid.price(&european_payoff, &default_node_value());
+        let price = grid.price(&vanilla_payoff(Call, strike),
+            &default_node_value());
         println!("Time taken: {}", time::precise_time_s() - now);
 
         let expected = black_scholes(s0, r, q, v, t, Call, strike);
