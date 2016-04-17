@@ -1,17 +1,9 @@
 use std::collections::HashMap;
 use std::cell::RefCell;
 use option::OptionType::*;
+use option::BarrierInOut::*;
+use option::BarrierUpDown::*;
 use option::*;
-
-/// Type alias for state transition function in the grid.  This determines
-/// the state to evolve to, given the current state k in node (i, j) and going
-/// forward to node (i+1, to_j).  (i+1) is because we are always moving to a
-/// node in the next period.  to_j can basically be going up or going down from
-/// node (i, j), therefore, can take up either j+1 or j-1.  In short, this
-/// represents the grid evolution function:
-///
-/// F(t+dt) = G(F(t), t, S(t+dt))
-pub type StateTransitionFunc = Box<Fn((isize, isize, isize), isize)->isize>;
 
 /// Structure to represent a recombining binomial tree.  Node (i, j) is the node
 /// in the i-th period with j up moves from the initial asset price.  j can be
@@ -66,6 +58,17 @@ pub struct Binomial {
     initial_state: isize,
 }
 
+/// Type alias for state transition function in the grid.  This determines
+/// the state to evolve to, given the current state k in node (i, j) and going
+/// forward to node (i+1, to_j).  (i+1) is because we are always moving to a
+/// node in the next period.  to_j can basically be going up or going down from
+/// node (i, j), therefore, can take up either j+1 or j-1.  In short, this
+/// represents the grid evolution function:
+///
+/// F(t+dt) = G(F(t), t, S(t+dt))
+pub type StateTransitionFunc =
+    Box<Fn(&Binomial, (isize, isize, isize), isize)->isize>;
+
 /// The payoff function which is used to calculate the value of terminal nodes
 /// based on the payoff of the product at expiry.  It has access to a reference
 /// to the Binomial struct and also the node index (i, j, k) where i represents
@@ -94,7 +97,7 @@ pub type NodeValueFunc = Box<Fn(&Binomial, (isize, isize, isize), f64)->f64>;
 /// dependent product, e.g. vanilla options.  It also serves as an example
 /// state transition function
 pub fn default_state_func() -> StateTransitionFunc {
-    Box::new( |(_, _, _): (isize, isize, isize), _: isize| { 0 } )
+    Box::new( |_, (_, _, _): (isize, isize, isize), _: isize| { 0 } )
 }
 
 /// A default node value function which always simply returns the backward
@@ -141,6 +144,67 @@ pub fn vanilla_payoff(opt_type: OptionType, strike: f64) -> PayoffFunc {
                 Put => (-intrinsic).max(0.0)
             }
         })
+}
+
+/// A payoff function for barrier option
+/// # Arguments
+/// * `barrier_inout` - either In or Out for knock-in and knock-out respectively
+/// * `opt_type` - either Call or Put
+/// * `strike` - strike price
+pub fn barrier_payoff(barrier_inout: BarrierInOut, opt_type: OptionType,
+    strike: f64) -> PayoffFunc {
+        let vanilla_payoff = vanilla_payoff(opt_type, strike);
+        Box::new( move |grid, (i, j, k)| {
+            let triggered = if k == 0 { false } else { true };
+            let vanilla_payoff = vanilla_payoff(&grid, (i, j, k));
+            match barrier_inout {
+                In => if triggered { vanilla_payoff } else { 0.0 },
+                Out => if triggered { 0.0 } else { vanilla_payoff },
+            }
+        })
+}
+
+/// State transition function for barrier option with continuous observation
+/// # Arguments
+/// * `barrier_updown` - either Up or Down
+/// * `barrier` - barrier price
+///
+/// # Example
+/// ```
+/// use payoffs::lattice::*;
+/// use payoffs::option::OptionType::*;
+/// use payoffs::option::BarrierInOut::*;
+/// use payoffs::option::BarrierUpDown::*;
+/// let s0 = 100.0;
+/// let r = 0.02;
+/// let q = 0.0;
+/// let v = 0.4;
+/// let t = 0.25;
+/// let strike = 100.0;
+/// let barrier = 125.0;
+/// let period = 3000;
+///
+/// let mut grid = Binomial::new(s0, r, q, v, t, period,
+///     barrier_state(Up, barrier), 0);
+///
+/// let price = grid.price(&barrier_payoff(Out, Call, strike),
+///     &default_node_value());
+///
+/// println!("Price: {}", price);
+/// ```
+pub fn barrier_state(barrier_updown: BarrierUpDown, barrier: f64)
+    -> StateTransitionFunc {
+
+    Box::new( move |grid, (i, _, k), to_j| {
+        let asset_price = grid.get_asset_price(i+1, to_j);
+        // State 0 - not triggered; State 1 - triggered
+        // if already triggered, stay triggered
+        let triggered = ( k == 1 ) || match barrier_updown {
+            Up => if asset_price > barrier { true } else { false },
+            Down => if asset_price < barrier { true } else { false },
+        };
+        if triggered { 1 } else { 0 }
+    })
 }
 
 impl Binomial {
@@ -262,8 +326,8 @@ impl Binomial {
         let down_index = current_index + i as usize + 1;
         let up_index = down_index + 1;
         for &k in self.values[current_index].borrow().keys() {
-            let up_state = f((i, j, k), j+1);
-            let down_state = f((i, j, k), j-1);
+            let up_state = f(&self, (i, j, k), j+1);
+            let down_state = f(&self, (i, j, k), j-1);
             self.values[down_index].borrow_mut().insert(down_state, 0.0);
             self.values[up_index].borrow_mut().insert(up_state, 0.0);
         }
@@ -348,9 +412,9 @@ impl Binomial {
                 for (&k, v) in self.values[index].borrow_mut().iter_mut() {
                     let down_index = index + i as usize + 1;
                     let up_index = down_index + 1;
-                    let up_state = state((i, j, k), j+1);
+                    let up_state = state(&self, (i, j, k), j+1);
                     let up_value = self.values[up_index].borrow()[&up_state];
-                    let down_state = state((i, j, k), j-1);
+                    let down_state = state(&self, (i, j, k), j-1);
                     let down_value =
                         self.values[down_index].borrow()[&down_state];
                     let induced_value = discount * (
@@ -382,6 +446,8 @@ mod test {
     use std::collections::HashMap;
     use option::OptionType::*;
     use option::black_scholes;
+    use option::BarrierInOut::*;
+    use option::BarrierUpDown::*;
 
     #[test]
     pub fn test_binomial_populate_and_get_asset_price() {
@@ -441,7 +507,7 @@ mod test {
         let period = 4;
 
         let lookback: StateTransitionFunc = Box::new(
-            |(_, _, k): (isize, isize, isize), to_j: isize| {
+            |_, (_, _, k): (isize, isize, isize), to_j: isize| {
                 cmp::max(to_j, k)
         } );
 
@@ -526,4 +592,26 @@ mod test {
         let expected = black_scholes(s0, r, q, v, t, Call, strike);
         assert!( (price-expected).abs() < 0.01 );
     }
+
+    #[test]
+    pub fn test_barrier() {
+        let s0 = 100.0;
+        let r = 0.02;
+        let q = 0.0;
+        let v = 0.4;
+        let t = 0.25;
+        let strike = 100.0;
+        let barrier = 125.0;
+        let period = 1000;
+
+        let now = time::precise_time_s();
+        let mut grid = Binomial::new(s0, r, q, v, t, period,
+            barrier_state(Up, barrier), 0);
+
+        let price = grid.price(&barrier_payoff(Out, Call, strike),
+            &default_node_value());
+        println!("Price: {}", price);
+        println!("Time taken: {}", time::precise_time_s() - now);
+    }
+
 }
