@@ -1,3 +1,23 @@
+//
+// RustQ - library for pricing financial derivatives written in Rust
+// Copyright (c) 2016 by Albert Pang <albert.pang@me.com>
+// All rights reserved.
+//
+// This file is a part of RustQ
+//
+// RustQ is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// RustQ is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
 extern crate rand;
 
 use self::rand::distributions::normal::Normal;
@@ -52,7 +72,7 @@ pub trait PathGenerator<T> {
 ///
 /// # Example
 /// ```
-/// use payoffs::montecarlo::draw_normal;
+/// use rustq::montecarlo::draw_normal;
 ///
 /// let samples = draw_normal( 0.0, 1.0, 100 );
 /// println!( "{:?}", samples );
@@ -78,8 +98,8 @@ pub fn draw_normal(mean: f64, sd: f64, n: usize) -> Vec<f64> {
 ///
 /// #Example
 /// ```
-/// use payoffs::montecarlo::draw_normal;
-/// use payoffs::montecarlo::gbm_samples;
+/// use rustq::montecarlo::draw_normal;
+/// use rustq::montecarlo::gbm_samples;
 ///
 /// let t = 0.25;
 /// let n = 100;
@@ -108,8 +128,8 @@ pub fn gbm_samples(s0: f64, r: f64, q: f64, v: f64, t: f64,
 ///
 /// #Example
 /// ```
-/// use payoffs::montecarlo::draw_normal;
-/// use payoffs::montecarlo::make_antithetic;
+/// use rustq::montecarlo::draw_normal;
+/// use rustq::montecarlo::make_antithetic;
 ///
 /// let normal_samples = draw_normal( 0.0, 1.0, 100 );
 /// let anti = make_antithetic( &normal_samples );
@@ -133,8 +153,8 @@ pub fn make_antithetic(orig: &Vec<f64>) -> Vec<f64> {
 ///
 /// #Example
 /// ```
-/// use payoffs::montecarlo::gbm_path;
-/// use payoffs::montecarlo::VarianceReduction::*;
+/// use rustq::montecarlo::gbm_path;
+/// use rustq::montecarlo::VarianceReduction::*;
 ///
 /// let single_path = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, None);
 /// let pair_of_paths = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, ATV);
@@ -170,8 +190,8 @@ pub fn gbm_path( s0: f64, r: f64, q: f64, v: f64, t: f64, n: usize,
 ///
 /// #Example
 /// ```
-/// use payoffs::montecarlo::gbm_path;
-/// use payoffs::montecarlo::VarianceReduction::*;
+/// use rustq::montecarlo::gbm_path;
+/// use rustq::montecarlo::VarianceReduction::*;
 ///
 /// let paths = gbm_path(100.0, 0.02, 0.0, 0.4, 0.25, 100, None);
 /// ```
@@ -246,11 +266,11 @@ pub fn european_payoff(opt_type: OptionType, r: f64, t: f64, strike: f64)
 /// barrier 125 and strike 100, with a monthly observation i.e. 3 observations
 ///
 /// ```
-/// use payoffs::montecarlo::*;
-/// use payoffs::montecarlo::VarianceReduction::*;
-/// use payoffs::option::OptionType::*;
-/// use payoffs::option::BarrierInOut::*;
-/// use payoffs::option::BarrierUpDown::*;
+/// use rustq::montecarlo::*;
+/// use rustq::montecarlo::VarianceReduction::*;
+/// use rustq::option::OptionType::*;
+/// use rustq::option::BarrierInOut::*;
+/// use rustq::option::BarrierUpDown::*;
 ///
 /// let s0 = 100.0;
 /// let r = 0.02;
@@ -298,12 +318,12 @@ pub fn barrier_payoff(barrier_updown: BarrierUpDown,
 ///
 /// # Example
 /// ```
-/// use payoffs::montecarlo::Path;
-/// use payoffs::montecarlo::gbm_path;
-/// use payoffs::montecarlo::VarianceReduction::*;
-/// use payoffs::montecarlo::monte_carlo_0;
-/// use payoffs::montecarlo::european_payoff;
-/// use payoffs::option::OptionType::*;
+/// use rustq::montecarlo::Path;
+/// use rustq::montecarlo::gbm_path;
+/// use rustq::montecarlo::VarianceReduction::*;
+/// use rustq::montecarlo::monte_carlo_0;
+/// use rustq::montecarlo::european_payoff;
+/// use rustq::option::OptionType::*;
 ///
 /// let s0 = 100.0;
 /// let r = 0.02;
@@ -324,15 +344,15 @@ pub fn barrier_payoff(barrier_updown: BarrierUpDown,
 /// ```
 pub fn monte_carlo_0(paths: &Vec<Path<f64>>, f: PayoffFunc) -> (f64, f64, f64)
 {
-    let payoffs: Vec<f64> = paths.iter().map( |path| {
+    let rustq: Vec<f64> = paths.iter().map( |path| {
         match path {
             &Path::Ordinary(ref ord) => f( &ord ),
             &Path::Antithetic((ref ord, ref anti)) => 0.5 * (f(&ord) + f(&anti))
         }
     } ).collect();
 
-    let sum = payoffs.iter().fold( 0.0, |acc, x| acc + x );
-    let sq_sum = payoffs.iter().fold( 0.0, |acc, x| acc + x * x );
+    let sum = rustq.iter().fold( 0.0, |acc, x| acc + x );
+    let sq_sum = rustq.iter().fold( 0.0, |acc, x| acc + x * x );
     let n = paths.len();
     let estimate = sum/n as f64;
     let var = sq_sum/(n-1) as f64 - estimate*estimate;
