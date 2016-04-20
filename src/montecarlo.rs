@@ -467,28 +467,25 @@ mod test {
         let barrier = 125.0;
         let m = 10000000;
         let num_threads = 100;
-
+        let num_paths = m/num_threads;
         let now = time::precise_time_s();
         let mut threads = vec![];
         for _ in 0..num_threads {
             threads.push(thread::spawn( move || {
-                let num_paths = m/num_threads;
                 let (estimate, _, _) =
                     monte_carlo(
                         GbmPathGenerator::new( s0, r, q, v, t, 3, ATV ),
                         num_paths,
                         barrier_payoff(Up, Out, Call, r, t, barrier, k)
                     );
-                (estimate * num_paths as f64, num_paths)
+                estimate
             }));
         }
 
-        let (total, num_paths) = threads.into_iter().fold((0.0, 0), |acc, t| {
-            let (running_total, running_num_paths) = acc;
-            let (t, n) = t.join().unwrap();
-            (running_total + t, running_num_paths + n) } );
+        let total = threads.into_iter().fold(0.0, |acc, t| {
+            acc + t.join().unwrap() });
         println!("{} secs", time::precise_time_s() - now);
-        let estimate = total/num_paths as f64;
+        let estimate = total/num_threads as f64;
         println!("result: {}", estimate);
         println!("number of cores: {}", num_cpus::get());
         assert_eq!( true, equal_within(estimate, 3.30, 0.01) );
